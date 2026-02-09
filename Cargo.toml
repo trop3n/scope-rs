@@ -1,0 +1,17 @@
+[package]
+name = "scope-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Oscilloscope audio visualizer - display audio as XY graphics"
+license = "MIT"
+
+[dependencies]
+# GUI framework (egui + windowing)
+eframe = "0.29"
+
+# Cross-platform audio I/O
+cpal = "0.15"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
