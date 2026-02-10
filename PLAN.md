@@ -4,7 +4,7 @@ An oscilloscope audio visualizer inspired by sosci. Displays audio input as real
 
 ## Current Status
 
-**Completed through Milestones 10, 11 & 12** - The app has:
+**Completed through Milestones 10, 11, 12, 14, 15 & 16** - The app has:
 - Audio input capture with cpal (reactive gain control)
 - Device selection dropdown
 - XY oscilloscope display with persistence/afterglow
@@ -17,8 +17,12 @@ An oscilloscope audio visualizer inspired by sosci. Displays audio input as real
 - Playback controls (play/pause/stop, loop, volume, speed)
 - Settings panel with all controls
 - Lock-free audio (SPSC ring buffers)
+- Settings persistence (serde JSON, auto-save/load)
+- MIDI CC input with parameter mapping and MIDI learn
 - Modular code structure (audio/, render/)
 - Zero compiler warnings
+- GitHub Actions CI/CD (build, test, lint on 3 platforms)
+- Automated release binary creation on git tags
 
 ## Project Structure
 
@@ -26,8 +30,18 @@ An oscilloscope audio visualizer inspired by sosci. Displays audio input as real
 scope-rs/
 ├── Cargo.toml
 ├── PLAN.md                 # This file
+├── .github/
+│   └── workflows/
+│       ├── ci.yml          # CI: build + test + lint (3 platforms)
+│       └── release.yml     # Release: build binaries on tag push
+├── docs/
+│   ├── 14-serialization.md
+│   ├── 15-midi.md
+│   └── 16-distribution.md
 └── src/
     ├── main.rs             # App entry point
+    ├── settings.rs         # Settings persistence (serde JSON)
+    ├── midi.rs             # MIDI input + CC parameter mapping
     ├── audio/
     │   ├── mod.rs
     │   ├── buffer.rs       # SampleBuffer, XYSample (Arc<Mutex<T>>)
@@ -96,20 +110,21 @@ scope-rs/
 - [x] Verify no audio glitches under load
 - [x] `docs/12-lock-free.md` (in osci-rs/docs/)
 
-#### Milestone 14: Settings Persistence
-- [ ] Serde serialization for settings
-- [ ] Auto-save/load preferences
-- [ ] `docs/14-serialization.md`
+#### Milestone 14: Settings Persistence ✅
+- [x] Serde serialization for settings
+- [x] Auto-save/load preferences
+- [x] `docs/14-serialization.md`
 
-#### Milestone 15: MIDI Control
-- [ ] MIDI input (`midir`)
-- [ ] Parameter mapping
-- [ ] `docs/15-midi.md`
+#### Milestone 15: MIDI Control ✅
+- [x] MIDI input (`midir`)
+- [x] Parameter mapping (9 parameters, MIDI learn, persist mappings)
+- [x] `docs/15-midi.md`
 
-#### Milestone 16: Distribution
-- [ ] Windows/macOS builds
-- [ ] Performance profiling
-- [ ] `docs/16-distribution.md`
+#### Milestone 16: Distribution ✅
+- [x] Cargo release profile (LTO, strip, codegen-units, panic=abort)
+- [x] GitHub Actions CI (build + test + fmt + clippy on 3 platforms)
+- [x] GitHub Actions release workflow (automated binaries on tag push)
+- [x] `docs/16-distribution.md`
 
 ---
 
@@ -123,17 +138,12 @@ symphonia = { version = "0.5", features = ["all"] }
 rfd = "0.15"
 thiserror = "2.0"
 ringbuf = "0.4"
-log = "0.4"
-env_logger = "0.11"
-```
-
-## Dependencies (Planned)
-
-```toml
-# Milestone 14+
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+dirs = "6.0"
 midir = "0.10"
+log = "0.4"
+env_logger = "0.11"
 ```
 
 ---

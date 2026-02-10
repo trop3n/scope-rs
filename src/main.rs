@@ -16,6 +16,7 @@ use eframe::egui;
 use std::time::Duration;
 
 mod audio;
+mod midi;
 mod render;
 mod settings;
 
@@ -55,6 +56,7 @@ struct ScopeApp {
     audio: AudioInput,
     file_player: AudioFilePlayer,
     oscilloscope: Oscilloscope,
+    midi: midi::MidiController,
     show_settings: bool,
     input_mode: InputMode,
 }
@@ -70,6 +72,7 @@ impl ScopeApp {
             audio,
             file_player,
             oscilloscope: Oscilloscope::new(),
+            midi: midi::MidiController::new(),
             show_settings: false,
             input_mode: InputMode::default(),
         };
@@ -90,6 +93,17 @@ impl Drop for ScopeApp {
 impl eframe::App for ScopeApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint();
+
+        // Poll MIDI and apply parameter updates
+        let midi_updates = self.midi.poll();
+        if !midi_updates.is_empty() {
+            midi::apply_updates(
+                &midi_updates,
+                &mut self.oscilloscope,
+                &mut self.audio,
+                &mut self.file_player,
+            );
+        }
 
         // Top panel
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
@@ -271,10 +285,13 @@ impl eframe::App for ScopeApp {
 
                     // Volume
                     ui.label("Vol:");
-                    if ui.add(
-                        egui::Slider::new(&mut self.file_player.volume, 0.0..=2.0)
-                            .show_value(false),
-                    ).changed() {
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut self.file_player.volume, 0.0..=2.0)
+                                .show_value(false),
+                        )
+                        .changed()
+                    {
                         self.file_player.sync_volume();
                     }
 
@@ -309,10 +326,13 @@ impl eframe::App for ScopeApp {
                     ui.collapsing("Audio", |ui| {
                         ui.horizontal(|ui| {
                             ui.label("Gain:");
-                            if ui.add(
-                                egui::Slider::new(&mut self.audio.gain, 0.1..=10.0)
-                                    .logarithmic(true),
-                            ).changed() {
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut self.audio.gain, 0.1..=10.0)
+                                        .logarithmic(true),
+                                )
+                                .changed()
+                            {
                                 self.audio.sync_gain();
                             }
                         });
@@ -430,6 +450,103 @@ impl eframe::App for ScopeApp {
                                 });
                         });
                     });
+
+                    ui.separator();
+
+                    ui.collapsing("MIDI", |ui| {
+                        // Port selector
+                        ui.horizontal(|ui| {
+                            ui.label("Port:");
+                            egui::ComboBox::from_id_salt("midi_port")
+                                .selected_text(
+                                    self.midi
+                                        .ports
+                                        .get(self.midi.selected_port)
+                                        .cloned()
+                                        .unwrap_or_else(|| "None".to_string()),
+                                )
+                                .show_ui(ui, |ui| {
+                                    for (i, name) in self.midi.ports.iter().enumerate() {
+                                        ui.selectable_value(&mut self.midi.selected_port, i, name);
+                                    }
+                                });
+                        });
+
+                        ui.horizontal(|ui| {
+                            let button_text = if self.midi.is_connected {
+                                "Disconnect"
+                            } else {
+                                "Connect"
+                            };
+                            if ui.button(button_text).clicked() {
+                                self.midi.toggle();
+                            }
+                            if ui.button("Refresh").clicked() {
+                                self.midi.scan_ports();
+                            }
+                        });
+
+                        ui.small(&self.midi.status);
+                        ui.separator();
+
+                        // Mappings
+                        ui.label("Mappings:");
+
+                        // Snapshot mapping info to avoid borrow conflicts
+                        let mapping_info: Vec<_> = self
+                            .midi
+                            .mappings
+                            .iter()
+                            .enumerate()
+                            .map(|(i, m)| (i, m.cc, m.param.name()))
+                            .collect();
+                        let learning = self.midi.learning;
+
+                        let mut remove_idx = None;
+                        let mut learn_idx = None;
+                        let mut cancel_learn = false;
+
+                        for (i, cc, param_name) in &mapping_info {
+                            ui.horizontal(|ui| {
+                                let is_learning = learning == Some(*i);
+                                let label = if is_learning {
+                                    format!("CC ? -> {}", param_name)
+                                } else {
+                                    format!("CC {:>3} -> {}", cc, param_name)
+                                };
+                                ui.monospace(&label);
+
+                                if is_learning {
+                                    if ui.small_button("Cancel").clicked() {
+                                        cancel_learn = true;
+                                    }
+                                } else if ui.small_button("Learn").clicked() {
+                                    learn_idx = Some(*i);
+                                }
+
+                                if ui.small_button("X").clicked() {
+                                    remove_idx = Some(*i);
+                                }
+                            });
+                        }
+
+                        // Apply deferred actions
+                        if cancel_learn {
+                            self.midi.cancel_learn();
+                        }
+                        if let Some(idx) = learn_idx {
+                            self.midi.start_learn(idx);
+                        }
+                        if let Some(idx) = remove_idx {
+                            self.midi.remove_mapping(idx);
+                        }
+
+                        // Add new mapping
+                        let unmapped = self.midi.unmapped_params();
+                        if !unmapped.is_empty() && ui.button("+ Add").clicked() {
+                            self.midi.add_mapping(0, unmapped[0]);
+                        }
+                    });
                 });
         }
 
@@ -448,7 +565,11 @@ impl eframe::App for ScopeApp {
                         InputMode::Live => "Live Input",
                         InputMode::File => "File Playback",
                     };
-                    ui.small(format!("Mode: {} | Display: {}", mode_str, self.oscilloscope.settings.display_mode.name()));
+                    ui.small(format!(
+                        "Mode: {} | Display: {}",
+                        mode_str,
+                        self.oscilloscope.settings.display_mode.name()
+                    ));
                 });
             });
         });

@@ -181,7 +181,9 @@ impl AudioFilePlayer {
 
         // Calculate duration
         let duration = if let Some(n_frames) = codec_params.n_frames {
-            let time_base = codec_params.time_base.unwrap_or(TimeBase::new(1, sample_rate));
+            let time_base = codec_params
+                .time_base
+                .unwrap_or(TimeBase::new(1, sample_rate));
             let time = time_base.calc_time(n_frames);
             Duration::from_secs_f64(time.seconds as f64 + time.frac)
         } else {
@@ -290,7 +292,9 @@ impl AudioFilePlayer {
             self.waveform = all_samples
                 .chunks(step)
                 .map(|chunk| {
-                    let (sum_x, sum_y) = chunk.iter().fold((0.0, 0.0), |acc, s| (acc.0 + s.0, acc.1 + s.1));
+                    let (sum_x, sum_y) = chunk
+                        .iter()
+                        .fold((0.0, 0.0), |acc, s| (acc.0 + s.0, acc.1 + s.1));
                     (sum_x / chunk.len() as f32, sum_y / chunk.len() as f32)
                 })
                 .collect();
@@ -319,7 +323,8 @@ impl AudioFilePlayer {
         self.start_audio_output();
 
         // Sync volume to atomic
-        self.volume_atomic.store(self.volume.to_bits(), Ordering::Relaxed);
+        self.volume_atomic
+            .store(self.volume.to_bits(), Ordering::Relaxed);
 
         // Start new playback thread
         self.is_running.store(true, Ordering::Relaxed);
@@ -452,7 +457,8 @@ impl AudioFilePlayer {
 
     /// Sync UI volume to audio thread
     pub fn sync_volume(&self) {
-        self.volume_atomic.store(self.volume.to_bits(), Ordering::Relaxed);
+        self.volume_atomic
+            .store(self.volume.to_bits(), Ordering::Relaxed);
     }
 
     /// Toggle play/pause
@@ -508,11 +514,7 @@ fn extract_samples(buffer: &AudioBufferRef<'_>) -> Vec<(f32, f32)> {
 
             for frame in 0..frames {
                 let x = buf.chan(0)[frame];
-                let y = if channels > 1 {
-                    buf.chan(1)[frame]
-                } else {
-                    x
-                };
+                let y = if channels > 1 { buf.chan(1)[frame] } else { x };
                 samples.push((x, y));
             }
         }
@@ -551,6 +553,7 @@ fn extract_samples(buffer: &AudioBufferRef<'_>) -> Vec<(f32, f32)> {
 }
 
 /// Playback thread function
+#[allow(clippy::too_many_arguments)]
 fn playback_thread(
     path: &Path,
     buffer: SampleBuffer,
@@ -684,7 +687,8 @@ fn playback_thread(
 
                 // Pace the decoder - wait if audio buffer is getting full
                 // This prevents decoding too far ahead while cpal drains at real-time
-                let should_wait = audio_producer.try_lock()
+                let should_wait = audio_producer
+                    .try_lock()
                     .map(|guard| guard.as_ref().map(|p| p.is_full()).unwrap_or(false))
                     .unwrap_or(false);
                 if should_wait {

@@ -110,7 +110,8 @@ impl AudioInput {
         let buffer = self.buffer.clone_ref();
         let is_capturing = Arc::clone(&self.is_capturing);
         // Sync current UI gain to atomic before starting
-        self.gain_atomic.store(self.gain.to_bits(), Ordering::Relaxed);
+        self.gain_atomic
+            .store(self.gain.to_bits(), Ordering::Relaxed);
         let gain_atomic = Arc::clone(&self.gain_atomic);
 
         let stream_result = match config.sample_format() {
@@ -124,11 +125,7 @@ impl AudioInput {
                     let gain = f32::from_bits(gain_atomic.load(Ordering::Relaxed));
                     for frame in data.chunks(channels) {
                         let x = frame[0] * gain;
-                        let y = if channels > 1 {
-                            frame[1] * gain
-                        } else {
-                            x
-                        };
+                        let y = if channels > 1 { frame[1] * gain } else { x };
                         buffer.push(XYSample::new(x, y));
                     }
                 },
@@ -140,26 +137,27 @@ impl AudioInput {
                 let buffer = self.buffer.clone_ref();
                 let gain_atomic = Arc::clone(&self.gain_atomic);
                 device.build_input_stream(
-                &config.into(),
-                move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    if !is_capturing.load(Ordering::Relaxed) {
-                        return;
-                    }
+                    &config.into(),
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        if !is_capturing.load(Ordering::Relaxed) {
+                            return;
+                        }
 
-                    let gain = f32::from_bits(gain_atomic.load(Ordering::Relaxed));
-                    for frame in data.chunks(channels) {
-                        let x = (frame[0] as f32 / 32768.0) * gain;
-                        let y = if channels > 1 {
-                            (frame[1] as f32 / 32768.0) * gain
-                        } else {
-                            x
-                        };
-                        buffer.push(XYSample::new(x, y));
-                    }
-                },
-                |err| log::error!("Audio error: {}", err),
-                None,
-            )},
+                        let gain = f32::from_bits(gain_atomic.load(Ordering::Relaxed));
+                        for frame in data.chunks(channels) {
+                            let x = (frame[0] as f32 / 32768.0) * gain;
+                            let y = if channels > 1 {
+                                (frame[1] as f32 / 32768.0) * gain
+                            } else {
+                                x
+                            };
+                            buffer.push(XYSample::new(x, y));
+                        }
+                    },
+                    |err| log::error!("Audio error: {}", err),
+                    None,
+                )
+            }
             format => {
                 self.status = format!("Unsupported format: {:?}", format);
                 return;
@@ -195,7 +193,8 @@ impl AudioInput {
     /// Sync the UI gain value to the audio thread
     /// Call this after the gain slider changes
     pub fn sync_gain(&self) {
-        self.gain_atomic.store(self.gain.to_bits(), Ordering::Relaxed);
+        self.gain_atomic
+            .store(self.gain.to_bits(), Ordering::Relaxed);
     }
 
     /// Toggle capture state

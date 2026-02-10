@@ -68,10 +68,7 @@ impl ColorTheme {
                 Color32::from_rgb(100, 255, 100),
                 Color32::from_rgb(10, 20, 10),
             ),
-            Self::Amber => (
-                Color32::from_rgb(255, 176, 0),
-                Color32::from_rgb(20, 15, 5),
-            ),
+            Self::Amber => (Color32::from_rgb(255, 176, 0), Color32::from_rgb(20, 15, 5)),
             Self::Blue => (
                 Color32::from_rgb(100, 150, 255),
                 Color32::from_rgb(10, 10, 20),
@@ -261,8 +258,14 @@ impl Oscilloscope {
             let y = rect.top() + t * rect.height();
             let stroke = if i == 5 { stroke_axis } else { stroke_grid };
 
-            painter.line_segment([Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())], stroke);
-            painter.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], stroke);
+            painter.line_segment(
+                [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
+                stroke,
+            );
+            painter.line_segment(
+                [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+                stroke,
+            );
         }
     }
 

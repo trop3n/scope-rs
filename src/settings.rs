@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::midi::MidiMapping;
 use crate::render::{ColorTheme, DisplayMode};
 use crate::ScopeApp;
 
@@ -44,6 +45,9 @@ pub struct AppSettings {
     pub speed: f32,
     pub loop_enabled: bool,
 
+    // MIDI
+    pub midi_mappings: Vec<MidiMapping>,
+
     // Window
     pub show_settings: bool,
 }
@@ -69,6 +73,8 @@ impl Default for AppSettings {
             volume: 1.0,
             speed: 1.0,
             loop_enabled: false,
+
+            midi_mappings: Vec::new(),
 
             show_settings: false,
         }
@@ -140,6 +146,8 @@ impl AppSettings {
             speed: app.file_player.speed,
             loop_enabled: app.file_player.loop_playback,
 
+            midi_mappings: app.midi.mappings.clone(),
+
             show_settings: app.show_settings,
         }
     }
@@ -165,6 +173,8 @@ impl AppSettings {
         app.file_player.volume = self.volume;
         app.file_player.speed = self.speed;
         app.file_player.loop_playback = self.loop_enabled;
+
+        app.midi.mappings = self.midi_mappings.clone();
 
         app.show_settings = self.show_settings;
     }
