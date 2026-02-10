@@ -17,6 +17,7 @@ use std::time::Duration;
 
 mod audio;
 mod render;
+mod settings;
 
 use audio::{AudioFilePlayer, AudioInput, PlaybackState, SampleBuffer};
 use render::{ColorTheme, DisplayMode, Oscilloscope};
@@ -64,14 +65,25 @@ impl ScopeApp {
         let audio = AudioInput::new(buffer.clone_ref());
         let file_player = AudioFilePlayer::new(buffer.clone_ref());
 
-        Self {
+        let mut app = Self {
             buffer,
             audio,
             file_player,
             oscilloscope: Oscilloscope::new(),
             show_settings: false,
             input_mode: InputMode::default(),
-        }
+        };
+
+        let settings = settings::AppSettings::load();
+        settings.apply(&mut app);
+
+        app
+    }
+}
+
+impl Drop for ScopeApp {
+    fn drop(&mut self) {
+        settings::AppSettings::from_app(self).save();
     }
 }
 

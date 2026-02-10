@@ -24,6 +24,13 @@ thiserror = "2.0"
 # Lock-free ring buffer for audio
 ringbuf = "0.4"
 
+# Serialization / settings persistence
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Platform config directory
+dirs = "6.0"
+
 # Logging
 log = "0.4"
 env_logger = "0.11"

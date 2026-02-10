@@ -3,11 +3,12 @@
 //! Enhanced version with multiple display modes and channel controls.
 
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
+use serde::{Deserialize, Serialize};
 
 use crate::audio::XYSample;
 
 /// Display mode for the oscilloscope
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub enum DisplayMode {
     /// Draw individual dots at each sample point
     Dots,
@@ -36,7 +37,7 @@ impl DisplayMode {
 }
 
 /// Color theme preset
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub enum ColorTheme {
     #[default]
     Green,
