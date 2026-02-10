@@ -87,10 +87,11 @@ scope-rs/
 
 ### Phase 4: Advanced Features
 
-#### Milestone 12: Lock-Free Audio
-- [ ] Replace `Arc<Mutex<T>>` with lock-free ring buffer
-- [ ] Verify no audio glitches under load
-- [ ] `docs/12-lock-free.md`
+#### Milestone 12: Lock-Free Audio ✅
+- [x] Replace `Arc<Mutex<T>>` with lock-free ring buffer (`ringbuf` crate)
+- [x] SPSC producer/consumer pattern for audio↔UI communication
+- [x] Verify no audio glitches under load
+- [x] `docs/12-lock-free.md` (in osci-rs/docs/)
 
 #### Milestone 14: Settings Persistence
 - [ ] Serde serialization for settings
@@ -118,6 +119,7 @@ cpal = "0.15"
 symphonia = { version = "0.5", features = ["all"] }
 rfd = "0.15"
 thiserror = "2.0"
+ringbuf = "0.4"
 log = "0.4"
 env_logger = "0.11"
 ```
@@ -125,8 +127,7 @@ env_logger = "0.11"
 ## Dependencies (Planned)
 
 ```toml
-# Milestone 12+
-ringbuf = "0.4"
+# Milestone 14+
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 midir = "0.10"
