@@ -2,4 +2,4 @@
 
 mod oscilloscope;
 
-pub use oscilloscope::Oscilloscope;
+pub use oscilloscope::{ColorTheme, DisplayMode, Oscilloscope, OscilloscopeSettings};

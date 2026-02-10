@@ -12,6 +12,15 @@ eframe = "0.29"
 # Cross-platform audio I/O
 cpal = "0.15"
 
+# Audio file decoding (WAV, MP3, FLAC, OGG, etc.)
+symphonia = { version = "0.5", features = ["all"] }
+
+# File dialogs
+rfd = "0.15"
+
+# Error handling
+thiserror = "2.0"
+
 # Logging
 log = "0.4"
 env_logger = "0.11"

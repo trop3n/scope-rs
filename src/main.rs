@@ -2,19 +2,30 @@
 //!
 //! This application visualizes audio input as XY oscilloscope graphics.
 //!
-//! ## Milestone 3: Oscilloscope Display
+//! ## Milestone 10 & 11: Audio Visualization Polish + File Playback
 //! This version adds:
-//! - Modular code structure (audio/, render/)
-//! - XY oscilloscope visualization
-//! - Persistence/afterglow effect
+//! - Multiple display modes (Dots, Lines, Gradient, Points)
+//! - Channel controls (swap, invert, DC offset)
+//! - Color themes
+//! - Audio file playback with symphonia
+//! - Waveform overview display
 
 use eframe::egui;
+use std::time::Duration;
 
 mod audio;
 mod render;
 
-use audio::{AudioInput, SampleBuffer};
-use render::Oscilloscope;
+use audio::{AudioFilePlayer, AudioInput, PlaybackState, SampleBuffer};
+use render::{ColorTheme, DisplayMode, Oscilloscope};
+
+/// Input source mode
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+enum InputMode {
+    #[default]
+    Live,
+    File,
+}
 
 const BUFFER_SIZE: usize = 2048;
 
@@ -39,20 +50,25 @@ fn main() -> eframe::Result<()> {
 struct ScopeApp {
     buffer: SampleBuffer,
     audio: AudioInput,
+    file_player: AudioFilePlayer,
     oscilloscope: Oscilloscope,
     show_settings: bool,
+    input_mode: InputMode,
 }
 
 impl ScopeApp {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let buffer = SampleBuffer::new(BUFFER_SIZE);
         let audio = AudioInput::new(buffer.clone_ref());
+        let file_player = AudioFilePlayer::new(buffer.clone_ref());
 
         Self {
             buffer,
             audio,
+            file_player,
             oscilloscope: Oscilloscope::new(),
             show_settings: false,
+            input_mode: InputMode::default(),
         }
     }
 }
@@ -67,41 +83,204 @@ impl eframe::App for ScopeApp {
                 ui.heading("scope-rs");
                 ui.separator();
 
-                // Device selector
-                egui::ComboBox::from_id_salt("device")
-                    .selected_text(
-                        self.audio
-                            .devices
-                            .get(self.audio.selected_device)
-                            .cloned()
-                            .unwrap_or_else(|| "None".to_string()),
-                    )
-                    .show_ui(ui, |ui| {
-                        for (i, name) in self.audio.devices.iter().enumerate() {
-                            ui.selectable_value(&mut self.audio.selected_device, i, name);
-                        }
-                    });
-
+                // Input mode selector
+                ui.selectable_value(&mut self.input_mode, InputMode::Live, "Live");
+                ui.selectable_value(&mut self.input_mode, InputMode::File, "File");
                 ui.separator();
 
-                // Capture button
-                let button_text = if self.audio.is_capturing() {
-                    "⏹ Stop"
-                } else {
-                    "▶ Capture"
-                };
+                match self.input_mode {
+                    InputMode::Live => {
+                        // Device selector
+                        egui::ComboBox::from_id_salt("device")
+                            .selected_text(
+                                self.audio
+                                    .devices
+                                    .get(self.audio.selected_device)
+                                    .cloned()
+                                    .unwrap_or_else(|| "None".to_string()),
+                            )
+                            .show_ui(ui, |ui| {
+                                for (i, name) in self.audio.devices.iter().enumerate() {
+                                    ui.selectable_value(&mut self.audio.selected_device, i, name);
+                                }
+                            });
 
-                let enabled = !self.audio.devices.is_empty() || self.audio.is_capturing();
-                if ui.add_enabled(enabled, egui::Button::new(button_text)).clicked() {
-                    self.audio.toggle();
+                        ui.separator();
+
+                        // Capture button
+                        let button_text = if self.audio.is_capturing() {
+                            "⏹ Stop"
+                        } else {
+                            "▶ Capture"
+                        };
+
+                        let enabled = !self.audio.devices.is_empty() || self.audio.is_capturing();
+                        if ui
+                            .add_enabled(enabled, egui::Button::new(button_text))
+                            .clicked()
+                        {
+                            self.audio.toggle();
+                        }
+
+                        ui.separator();
+                        ui.label(&self.audio.status);
+                    }
+                    InputMode::File => {
+                        // File open button
+                        if ui.button("📂 Open").clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter(
+                                    "Audio",
+                                    &["wav", "mp3", "flac", "ogg", "m4a", "aac", "aiff"],
+                                )
+                                .pick_file()
+                            {
+                                if let Err(e) = self.file_player.load(&path) {
+                                    log::error!("Failed to load file: {}", e);
+                                    self.file_player.status = format!("Error: {}", e);
+                                }
+                            }
+                        }
+
+                        ui.separator();
+
+                        // File info
+                        if let Some(info) = &self.file_player.info {
+                            ui.label(&info.filename);
+                            ui.separator();
+                        }
+
+                        ui.label(&self.file_player.status);
+                    }
                 }
 
-                ui.separator();
-                ui.toggle_value(&mut self.show_settings, "⚙ Settings");
-                ui.separator();
-                ui.label(&self.audio.status);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.toggle_value(&mut self.show_settings, "⚙ Settings");
+                });
             });
         });
+
+        // Bottom panel for file playback controls
+        if self.input_mode == InputMode::File && self.file_player.has_file() {
+            egui::TopBottomPanel::bottom("playback_panel").show(ctx, |ui| {
+                ui.add_space(4.0);
+
+                // Waveform overview / seek bar
+                let available_width = ui.available_width();
+                let (response, painter) = ui.allocate_painter(
+                    egui::vec2(available_width, 40.0),
+                    egui::Sense::click_and_drag(),
+                );
+                let rect = response.rect;
+
+                // Draw background
+                painter.rect_filled(rect, 4.0, egui::Color32::from_gray(30));
+
+                // Draw waveform
+                if !self.file_player.waveform.is_empty() {
+                    let waveform = &self.file_player.waveform;
+                    let center_y = rect.center().y;
+                    let height = rect.height() * 0.4;
+
+                    for (i, (x, y)) in waveform.iter().enumerate() {
+                        let t = i as f32 / waveform.len() as f32;
+                        let screen_x = rect.left() + t * rect.width();
+
+                        // Draw both channels
+                        let amp_x = x.abs().min(1.0) * height;
+                        let amp_y = y.abs().min(1.0) * height;
+
+                        painter.line_segment(
+                            [
+                                egui::pos2(screen_x, center_y - amp_x),
+                                egui::pos2(screen_x, center_y + amp_y),
+                            ],
+                            egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 120, 80)),
+                        );
+                    }
+                }
+
+                // Draw playhead
+                let position = self.file_player.position_fraction();
+                let playhead_x = rect.left() + position * rect.width();
+                painter.line_segment(
+                    [
+                        egui::pos2(playhead_x, rect.top()),
+                        egui::pos2(playhead_x, rect.bottom()),
+                    ],
+                    egui::Stroke::new(2.0, egui::Color32::WHITE),
+                );
+
+                // Handle seeking
+                if response.dragged() || response.clicked() {
+                    if let Some(pos) = response.interact_pointer_pos() {
+                        let seek_fraction = (pos.x - rect.left()) / rect.width();
+                        self.file_player.seek(seek_fraction);
+                    }
+                }
+
+                ui.add_space(4.0);
+
+                // Playback controls
+                ui.horizontal(|ui| {
+                    // Play/Pause button
+                    let play_text = match self.file_player.state() {
+                        PlaybackState::Playing => "⏸",
+                        _ => "▶",
+                    };
+                    if ui.button(play_text).clicked() {
+                        self.file_player.toggle();
+                    }
+
+                    // Stop button
+                    if ui.button("⏹").clicked() {
+                        self.file_player.stop();
+                    }
+
+                    ui.separator();
+
+                    // Time display
+                    let current = self.file_player.position_duration();
+                    let total = self
+                        .file_player
+                        .info
+                        .as_ref()
+                        .map(|i| i.duration)
+                        .unwrap_or(Duration::ZERO);
+                    ui.label(format!(
+                        "{} / {}",
+                        format_duration(current),
+                        format_duration(total)
+                    ));
+
+                    ui.separator();
+
+                    // Volume
+                    ui.label("Vol:");
+                    ui.add(
+                        egui::Slider::new(&mut self.file_player.volume, 0.0..=2.0)
+                            .show_value(false),
+                    );
+
+                    ui.separator();
+
+                    // Speed
+                    ui.label("Speed:");
+                    ui.add(
+                        egui::Slider::new(&mut self.file_player.speed, 0.25..=2.0)
+                            .show_value(false),
+                    );
+                    ui.label(format!("{:.1}x", self.file_player.speed));
+
+                    ui.separator();
+
+                    // Loop toggle
+                    ui.checkbox(&mut self.file_player.loop_playback, "Loop");
+                });
+
+                ui.add_space(4.0);
+            });
+        }
 
         // Settings panel
         if self.show_settings {
@@ -124,6 +303,22 @@ impl eframe::App for ScopeApp {
                     ui.separator();
 
                     ui.collapsing("Display", |ui| {
+                        // Display mode selector
+                        ui.horizontal(|ui| {
+                            ui.label("Mode:");
+                            egui::ComboBox::from_id_salt("display_mode")
+                                .selected_text(self.oscilloscope.settings.display_mode.name())
+                                .show_ui(ui, |ui| {
+                                    for mode in DisplayMode::all() {
+                                        ui.selectable_value(
+                                            &mut self.oscilloscope.settings.display_mode,
+                                            *mode,
+                                            mode.name(),
+                                        );
+                                    }
+                                });
+                        });
+
                         ui.horizontal(|ui| {
                             ui.label("Zoom:");
                             ui.add(egui::Slider::new(
@@ -157,7 +352,6 @@ impl eframe::App for ScopeApp {
                         });
 
                         ui.checkbox(&mut self.oscilloscope.settings.show_graticule, "Show grid");
-                        ui.checkbox(&mut self.oscilloscope.settings.draw_lines, "Draw lines");
 
                         if ui.button("Clear persistence").clicked() {
                             self.oscilloscope.clear_persistence();
@@ -166,26 +360,56 @@ impl eframe::App for ScopeApp {
 
                     ui.separator();
 
-                    ui.collapsing("Color", |ui| {
+                    ui.collapsing("Channel", |ui| {
+                        ui.checkbox(&mut self.oscilloscope.settings.swap_xy, "Swap X/Y");
+                        ui.checkbox(&mut self.oscilloscope.settings.invert_x, "Invert X");
+                        ui.checkbox(&mut self.oscilloscope.settings.invert_y, "Invert Y");
+
+                        ui.separator();
+
                         ui.horizontal(|ui| {
-                            if ui.button("Green").clicked() {
-                                self.oscilloscope.settings.color =
-                                    egui::Color32::from_rgb(100, 255, 100);
-                                self.oscilloscope.settings.background =
-                                    egui::Color32::from_rgb(10, 20, 10);
-                            }
-                            if ui.button("Amber").clicked() {
-                                self.oscilloscope.settings.color =
-                                    egui::Color32::from_rgb(255, 176, 0);
-                                self.oscilloscope.settings.background =
-                                    egui::Color32::from_rgb(20, 15, 5);
-                            }
-                            if ui.button("Blue").clicked() {
-                                self.oscilloscope.settings.color =
-                                    egui::Color32::from_rgb(100, 150, 255);
-                                self.oscilloscope.settings.background =
-                                    egui::Color32::from_rgb(10, 10, 20);
-                            }
+                            ui.label("X offset:");
+                            ui.add(egui::Slider::new(
+                                &mut self.oscilloscope.settings.dc_offset_x,
+                                -1.0..=1.0,
+                            ));
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("Y offset:");
+                            ui.add(egui::Slider::new(
+                                &mut self.oscilloscope.settings.dc_offset_y,
+                                -1.0..=1.0,
+                            ));
+                        });
+
+                        if ui.button("Reset offsets").clicked() {
+                            self.oscilloscope.settings.dc_offset_x = 0.0;
+                            self.oscilloscope.settings.dc_offset_y = 0.0;
+                        }
+                    });
+
+                    ui.separator();
+
+                    ui.collapsing("Color", |ui| {
+                        // Theme selector
+                        ui.horizontal(|ui| {
+                            ui.label("Theme:");
+                            egui::ComboBox::from_id_salt("color_theme")
+                                .selected_text(self.oscilloscope.settings.theme.name())
+                                .show_ui(ui, |ui| {
+                                    for theme in ColorTheme::all() {
+                                        if ui
+                                            .selectable_label(
+                                                self.oscilloscope.settings.theme == *theme,
+                                                theme.name(),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.oscilloscope.settings.apply_theme(*theme);
+                                        }
+                                    }
+                                });
                         });
                     });
                 });
@@ -202,9 +426,21 @@ impl eframe::App for ScopeApp {
                     ui.separator();
                     ui.small(format!("Total: {}", self.buffer.samples_written()));
                     ui.separator();
-                    ui.small("Milestone 3: XY Oscilloscope Display");
+                    let mode_str = match self.input_mode {
+                        InputMode::Live => "Live Input",
+                        InputMode::File => "File Playback",
+                    };
+                    ui.small(format!("Mode: {} | Display: {}", mode_str, self.oscilloscope.settings.display_mode.name()));
                 });
             });
         });
     }
+}
+
+/// Format a duration as MM:SS
+fn format_duration(d: Duration) -> String {
+    let secs = d.as_secs();
+    let mins = secs / 60;
+    let secs = secs % 60;
+    format!("{:02}:{:02}", mins, secs)
 }

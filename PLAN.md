@@ -4,11 +4,17 @@ An oscilloscope audio visualizer inspired by sosci. Displays audio input as real
 
 ## Current Status
 
-**Completed through Milestone 3** - The app has:
+**Completed through Milestones 10 & 11** - The app has:
 - Audio input capture with cpal
 - Device selection dropdown
 - XY oscilloscope display with persistence/afterglow
-- Settings panel (gain, zoom, line width, intensity, color presets)
+- Multiple display modes (Dots, Lines, Gradient, Points)
+- Channel controls (swap X/Y, invert, DC offset)
+- Color themes (Green, Amber, Blue, White, Purple, Cyan, Red)
+- Audio file playback with symphonia (WAV, MP3, FLAC, OGG, etc.)
+- Waveform overview with seek bar
+- Playback controls (play/pause/stop, loop, volume, speed)
+- Settings panel with all controls
 - Modular code structure (audio/, render/)
 
 ## Project Structure
@@ -22,7 +28,8 @@ scope-rs/
     ├── audio/
     │   ├── mod.rs
     │   ├── buffer.rs       # SampleBuffer, XYSample (Arc<Mutex<T>>)
-    │   └── input.rs        # AudioInput (cpal input capture)
+    │   ├── input.rs        # AudioInput (cpal input capture)
+    │   └── file.rs         # AudioFilePlayer (symphonia playback)
     └── render/
         ├── mod.rs
         └── oscilloscope.rs # XY display widget with persistence
@@ -52,27 +59,29 @@ scope-rs/
 
 ---
 
-### Phase 3: Core Features (Next)
+### Phase 3: Core Features ✅
 
-#### Milestone 10: Audio Visualization Polish
+#### Milestone 10: Audio Visualization Polish ✅
 **Goal:** Full-featured audio visualizer
 
 **Deliverables:**
-- [ ] Multiple display modes (dots, lines, gradient)
-- [ ] Gain and DC offset controls (improved)
-- [ ] Color/theme options (more presets)
-- [ ] Device hot-plug detection
+- [x] Multiple display modes (Dots, Lines, Gradient, Points)
+- [x] Channel controls (swap X/Y, invert X/Y, DC offset)
+- [x] Color/theme options (7 presets)
+- [ ] Device hot-plug detection (deferred)
 
-#### Milestone 11: Audio File Playback
+#### Milestone 11: Audio File Playback ✅
 **Goal:** Load and visualize audio files
 
 **Rust concepts:** Audio decoding, playback control
 
 **Deliverables:**
-- [ ] Audio file loading (`symphonia` crate)
-- [ ] Playback controls (play/pause/seek)
-- [ ] Waveform overview display
-- [ ] `docs/11-audio-files.md`
+- [x] Audio file loading (`symphonia` crate)
+- [x] Playback controls (play/pause/stop/seek)
+- [x] Waveform overview display with seeking
+- [x] Volume and speed controls
+- [x] Loop mode
+- [ ] `docs/11-audio-files.md` (documentation pending)
 
 ---
 
@@ -106,6 +115,9 @@ scope-rs/
 [dependencies]
 eframe = "0.29"
 cpal = "0.15"
+symphonia = { version = "0.5", features = ["all"] }
+rfd = "0.15"
+thiserror = "2.0"
 log = "0.4"
 env_logger = "0.11"
 ```
@@ -113,13 +125,10 @@ env_logger = "0.11"
 ## Dependencies (Planned)
 
 ```toml
-# Milestone 11+
+# Milestone 12+
 ringbuf = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-thiserror = "2.0"
-rfd = "0.15"
-symphonia = "0.5"
 midir = "0.10"
 ```
 
