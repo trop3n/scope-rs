@@ -10,5 +10,6 @@ mod file;
 mod input;
 
 pub use buffer::{SampleBuffer, XYSample};
+#[allow(unused_imports)]
 pub use file::{AudioFileInfo, AudioFilePlayer, FileError, PlaybackState};
 pub use input::AudioInput;

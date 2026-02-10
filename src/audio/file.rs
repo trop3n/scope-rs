@@ -4,15 +4,20 @@
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use ringbuf::{
+    traits::{Consumer, Observer, Producer, Split},
+    HeapRb,
+};
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
+use symphonia::core::formats::{FormatOptions, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
@@ -86,6 +91,15 @@ pub struct AudioFilePlayer {
     /// Sample buffer for visualization
     buffer: SampleBuffer,
 
+    /// Audio output ring buffer producer (for feeding cpal)
+    audio_producer: Arc<Mutex<Option<ringbuf::HeapProd<f32>>>>,
+
+    /// cpal output stream for audio playback
+    output_stream: Option<cpal::Stream>,
+
+    /// Shared volume for audio thread (AtomicU32 with f32 bits)
+    volume_atomic: Arc<AtomicU32>,
+
     /// Playback speed multiplier
     pub speed: f32,
 
@@ -114,6 +128,9 @@ impl AudioFilePlayer {
             is_running: Arc::new(AtomicBool::new(false)),
             thread_handle: None,
             buffer,
+            audio_producer: Arc::new(Mutex::new(None)),
+            output_stream: None,
+            volume_atomic: Arc::new(AtomicU32::new(1.0_f32.to_bits())),
             speed: 1.0,
             volume: 1.0,
             loop_playback: false,
@@ -298,17 +315,24 @@ impl AudioFilePlayer {
             }
         }
 
+        // Set up cpal audio output
+        self.start_audio_output();
+
+        // Sync volume to atomic
+        self.volume_atomic.store(self.volume.to_bits(), Ordering::Relaxed);
+
         // Start new playback thread
         self.is_running.store(true, Ordering::Relaxed);
 
         let path = self.info.as_ref().unwrap().path.clone();
         let buffer = self.buffer.clone_ref();
+        let audio_producer = Arc::clone(&self.audio_producer);
         let state = Arc::clone(&self.state);
         let position = Arc::clone(&self.position);
         let is_running = Arc::clone(&self.is_running);
+        let volume_atomic = Arc::clone(&self.volume_atomic);
         let sample_rate = self.sample_rate;
         let speed = self.speed;
-        let volume = self.volume;
         let loop_playback = self.loop_playback;
 
         *self.state.lock().unwrap() = PlaybackState::Playing;
@@ -318,17 +342,82 @@ impl AudioFilePlayer {
             if let Err(e) = playback_thread(
                 &path,
                 buffer,
+                audio_producer,
                 state,
                 position,
                 is_running,
+                volume_atomic,
                 sample_rate,
                 speed,
-                volume,
                 loop_playback,
             ) {
                 log::error!("Playback error: {}", e);
             }
         }));
+    }
+
+    /// Set up cpal audio output stream
+    fn start_audio_output(&mut self) {
+        // Create audio ring buffer (stereo interleaved: L R L R ...)
+        let rb = HeapRb::<f32>::new(48000 * 2); // ~1 second of stereo audio
+        let (prod, mut cons) = rb.split();
+
+        // Store producer for the playback thread
+        *self.audio_producer.lock().unwrap() = Some(prod);
+
+        // Open cpal output
+        let host = cpal::default_host();
+        let device = match host.default_output_device() {
+            Some(d) => d,
+            None => {
+                log::warn!("No output device for file playback audio");
+                return;
+            }
+        };
+
+        let config = match device.default_output_config() {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!("Failed to get output config: {}", e);
+                return;
+            }
+        };
+
+        let channels = config.channels() as usize;
+
+        let stream = device.build_output_stream(
+            &config.into(),
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                for frame in data.chunks_mut(channels) {
+                    let left = cons.try_pop().unwrap_or(0.0);
+                    let right = cons.try_pop().unwrap_or(0.0);
+                    if channels >= 2 {
+                        frame[0] = left;
+                        frame[1] = right;
+                        for ch in frame.iter_mut().skip(2) {
+                            *ch = 0.0;
+                        }
+                    } else {
+                        frame[0] = (left + right) / 2.0;
+                    }
+                }
+            },
+            |err| log::error!("Audio output error: {}", err),
+            None,
+        );
+
+        match stream {
+            Ok(s) => {
+                if let Err(e) = s.play() {
+                    log::warn!("Failed to start output stream: {}", e);
+                    return;
+                }
+                self.output_stream = Some(s);
+            }
+            Err(e) => {
+                log::warn!("Failed to build output stream: {}", e);
+            }
+        }
     }
 
     /// Pause playback
@@ -349,12 +438,21 @@ impl AudioFilePlayer {
             let _ = handle.join();
         }
 
+        // Clean up audio output
+        self.output_stream = None;
+        *self.audio_producer.lock().unwrap() = None;
+
         self.position.store(0, Ordering::Relaxed);
         self.status = if self.info.is_some() {
             "Stopped".to_string()
         } else {
             "No file loaded".to_string()
         };
+    }
+
+    /// Sync UI volume to audio thread
+    pub fn sync_volume(&self) {
+        self.volume_atomic.store(self.volume.to_bits(), Ordering::Relaxed);
     }
 
     /// Toggle play/pause
@@ -456,12 +554,13 @@ fn extract_samples(buffer: &AudioBufferRef<'_>) -> Vec<(f32, f32)> {
 fn playback_thread(
     path: &Path,
     buffer: SampleBuffer,
+    audio_producer: Arc<Mutex<Option<ringbuf::HeapProd<f32>>>>,
     state: Arc<Mutex<PlaybackState>>,
     position: Arc<AtomicU64>,
     is_running: Arc<AtomicBool>,
+    volume_atomic: Arc<AtomicU32>,
     sample_rate: u32,
-    speed: f32,
-    volume: f32,
+    _speed: f32,
     loop_playback: bool,
 ) -> Result<(), FileError> {
     let file = File::open(path)?;
@@ -507,9 +606,9 @@ fn playback_thread(
         );
     }
 
-    // Calculate sleep time between sample batches for real-time playback
-    let batch_size = 1024;
-    let batch_duration = Duration::from_secs_f64(batch_size as f64 / (sample_rate as f64 * speed as f64));
+    // Sleep duration for pacing the decoder (slightly faster than real-time,
+    // cpal output callback drives actual timing)
+    let packet_sleep = Duration::from_millis(5);
 
     let mut current_sample = start_sample;
 
@@ -563,17 +662,34 @@ fn playback_thread(
             Ok(decoded) => {
                 let samples = extract_samples(&decoded);
                 let num_samples = samples.len();
+                let volume = f32::from_bits(volume_atomic.load(Ordering::Relaxed));
 
-                // Push samples to buffer for visualization
-                for (x, y) in samples {
+                // Push samples to visualization buffer
+                for &(x, y) in &samples {
                     buffer.push(XYSample::new(x * volume, y * volume));
+                }
+
+                // Push interleaved stereo samples to audio output
+                if let Ok(mut guard) = audio_producer.try_lock() {
+                    if let Some(ref mut prod) = *guard {
+                        for &(x, y) in &samples {
+                            let _ = prod.try_push(x * volume);
+                            let _ = prod.try_push(y * volume);
+                        }
+                    }
                 }
 
                 current_sample += num_samples as u64;
                 position.store(current_sample, Ordering::Relaxed);
 
-                // Sleep to maintain real-time playback
-                thread::sleep(batch_duration);
+                // Pace the decoder - wait if audio buffer is getting full
+                // This prevents decoding too far ahead while cpal drains at real-time
+                let should_wait = audio_producer.try_lock()
+                    .map(|guard| guard.as_ref().map(|p| p.is_full()).unwrap_or(false))
+                    .unwrap_or(false);
+                if should_wait {
+                    thread::sleep(packet_sleep);
+                }
             }
             Err(_) => continue,
         }

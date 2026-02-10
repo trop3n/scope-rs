@@ -3,7 +3,7 @@
 //! This module handles capturing audio from input devices (microphones, etc.)
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 use super::buffer::{SampleBuffer, XYSample};
@@ -25,7 +25,10 @@ pub struct AudioInput {
     /// Selected device index
     pub selected_device: usize,
 
-    /// Gain multiplier
+    /// Gain multiplier (shared atomically with audio thread)
+    gain_atomic: Arc<AtomicU32>,
+
+    /// Gain value for UI binding
     pub gain: f32,
 
     /// Status message
@@ -50,6 +53,7 @@ impl AudioInput {
             buffer,
             devices,
             selected_device: 0,
+            gain_atomic: Arc::new(AtomicU32::new(1.0_f32.to_bits())),
             gain: 1.0,
             status: if device_count > 0 {
                 format!("Found {} input device(s)", device_count)
@@ -105,7 +109,9 @@ impl AudioInput {
         let channels = config.channels() as usize;
         let buffer = self.buffer.clone_ref();
         let is_capturing = Arc::clone(&self.is_capturing);
-        let gain = self.gain;
+        // Sync current UI gain to atomic before starting
+        self.gain_atomic.store(self.gain.to_bits(), Ordering::Relaxed);
+        let gain_atomic = Arc::clone(&self.gain_atomic);
 
         let stream_result = match config.sample_format() {
             cpal::SampleFormat::F32 => device.build_input_stream(
@@ -115,6 +121,7 @@ impl AudioInput {
                         return;
                     }
 
+                    let gain = f32::from_bits(gain_atomic.load(Ordering::Relaxed));
                     for frame in data.chunks(channels) {
                         let x = frame[0] * gain;
                         let y = if channels > 1 {
@@ -128,13 +135,18 @@ impl AudioInput {
                 |err| log::error!("Audio error: {}", err),
                 None,
             ),
-            cpal::SampleFormat::I16 => device.build_input_stream(
+            cpal::SampleFormat::I16 => {
+                let is_capturing = Arc::clone(&self.is_capturing);
+                let buffer = self.buffer.clone_ref();
+                let gain_atomic = Arc::clone(&self.gain_atomic);
+                device.build_input_stream(
                 &config.into(),
                 move |data: &[i16], _: &cpal::InputCallbackInfo| {
                     if !is_capturing.load(Ordering::Relaxed) {
                         return;
                     }
 
+                    let gain = f32::from_bits(gain_atomic.load(Ordering::Relaxed));
                     for frame in data.chunks(channels) {
                         let x = (frame[0] as f32 / 32768.0) * gain;
                         let y = if channels > 1 {
@@ -147,7 +159,7 @@ impl AudioInput {
                 },
                 |err| log::error!("Audio error: {}", err),
                 None,
-            ),
+            )},
             format => {
                 self.status = format!("Unsupported format: {:?}", format);
                 return;
@@ -178,6 +190,12 @@ impl AudioInput {
         self.stream = None;
         self.status = "Stopped".to_string();
         log::info!("Capture stopped");
+    }
+
+    /// Sync the UI gain value to the audio thread
+    /// Call this after the gain slider changes
+    pub fn sync_gain(&self) {
+        self.gain_atomic.store(self.gain.to_bits(), Ordering::Relaxed);
     }
 
     /// Toggle capture state

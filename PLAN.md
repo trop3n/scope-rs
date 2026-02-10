@@ -4,18 +4,21 @@ An oscilloscope audio visualizer inspired by sosci. Displays audio input as real
 
 ## Current Status
 
-**Completed through Milestones 10 & 11** - The app has:
-- Audio input capture with cpal
+**Completed through Milestones 10, 11 & 12** - The app has:
+- Audio input capture with cpal (reactive gain control)
 - Device selection dropdown
 - XY oscilloscope display with persistence/afterglow
 - Multiple display modes (Dots, Lines, Gradient, Points)
 - Channel controls (swap X/Y, invert, DC offset)
 - Color themes (Green, Amber, Blue, White, Purple, Cyan, Red)
 - Audio file playback with symphonia (WAV, MP3, FLAC, OGG, etc.)
+- Audio output during file playback (via cpal output stream)
 - Waveform overview with seek bar
 - Playback controls (play/pause/stop, loop, volume, speed)
 - Settings panel with all controls
+- Lock-free audio (SPSC ring buffers)
 - Modular code structure (audio/, render/)
+- Zero compiler warnings
 
 ## Project Structure
 

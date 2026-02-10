@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! scope-rs - Oscilloscope Audio Visualizer
 //!
 //! This application visualizes audio input as XY oscilloscope graphics.
@@ -257,10 +259,12 @@ impl eframe::App for ScopeApp {
 
                     // Volume
                     ui.label("Vol:");
-                    ui.add(
+                    if ui.add(
                         egui::Slider::new(&mut self.file_player.volume, 0.0..=2.0)
                             .show_value(false),
-                    );
+                    ).changed() {
+                        self.file_player.sync_volume();
+                    }
 
                     ui.separator();
 
@@ -293,10 +297,12 @@ impl eframe::App for ScopeApp {
                     ui.collapsing("Audio", |ui| {
                         ui.horizontal(|ui| {
                             ui.label("Gain:");
-                            ui.add(
+                            if ui.add(
                                 egui::Slider::new(&mut self.audio.gain, 0.1..=10.0)
                                     .logarithmic(true),
-                            );
+                            ).changed() {
+                                self.audio.sync_gain();
+                            }
                         });
                     });
 
